@@ -1,0 +1,32 @@
+# Panel gerencial de cobranza (solo lectura).
+# Se une a la red Docker donde ya vive el servicio `fastapi_app`.
+#
+# Descubra el nombre real de esa red con:
+#   docker inspect fastapi_app --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
+#
+# Luego:
+#   COBRANZA_DOCKER_NETWORK=<red> docker compose up -d --build
+
+services:
+  panel_gerencial:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: panel_gerencial:latest
+    container_name: panel_gerencial
+    ports:
+      - "${PANEL_PORT:-3000}:80"
+    restart: unless-stopped
+    networks:
+      - cobranza
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  cobranza:
+    external: true
+    name: ${COBRANZA_DOCKER_NETWORK:-sistema_cobranza_default}

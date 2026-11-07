@@ -46,3 +46,29 @@ La infraestructura actual consta de dos servicios principales desplegados en la 
 ## 4. Política de Seguridad para el Panel Gerencial
 
 - **Modo Exclusivo de Consulta (Solo Lectura):** Por motivos de seguridad y control gerencial, el panel administrativo web **no** tendrá permisos de escritura, actualización (`PUT`/`PATCH`) ni eliminación (`DELETE`) sobre la base de datos operativa. Su propósito es únicamente la visualización de métricas, reportes, estados de cartera y auditoría.
+
+---
+
+## 5. Panel Gerencial (`panel_gerencial`)
+
+Frontend de consulta para gerencia. No registra, edita ni elimina información operativa.
+
+- **Tecnología:** React 18, TypeScript, Vite, Tailwind CSS, Recharts
+- **Imagen:** `panel_gerencial`
+- **Puerto publicado:** `3000` hacia Nginx `80` (`PANEL_PORT` para cambiarlo)
+- **Red:** externa, la misma de `fastapi_app`. Variable `COBRANZA_DOCKER_NETWORK` (por defecto `sistema_cobranza_default`)
+- **Proxy:** el navegador llama a `/api`. Nginx reenvía ese prefijo a `http://fastapi_app:8000` y rechaza `POST`, `PUT`, `PATCH` y `DELETE`, excepto `POST /api/auth/login`
+- **Vistas:** ingreso, resumen ejecutivo, cartera, liquidación por ruta y auditoría (`/logs_auditoria`)
+- **Login:** `POST /api/auth/login` con JSON `{ "username", "password" }`. La respuesta debe traer `access_token` (o `token`)
+
+```bash
+docker inspect fastapi_app --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}'
+COBRANZA_DOCKER_NETWORK=<red> docker compose up -d --build
+```
+
+El panel queda en `http://<servidor>:3000`. En desarrollo local, con el API en `localhost:8000`:
+
+```bash
+npm install
+npm run dev
+```
