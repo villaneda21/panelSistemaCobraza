@@ -2,10 +2,12 @@ import axios from 'axios';
 import type { DashboardSummary, DebtItem, DeudaCreate, LiquidarInput, PagoCreate, RouteItem, RouteStats, SessionUser, TodayDetails } from '../types';
 import { asList, asNumber, asRecord, asString, fastApiDetail, toDebt, toRoute, toRouteStats, toTodayDetails } from './normalize';
 
-const LOGIN_PATH = '/login';
 const TOKEN_KEY = 'panel_gerencial_token';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gestor-pagos.com';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+
+const LOGIN_PATH =
+  import.meta.env.VITE_LOGIN_PATH || (API_BASE_URL.startsWith('http') ? '/login' : '/auth/login');
 
 const http = axios.create({
   baseURL: API_BASE_URL,
