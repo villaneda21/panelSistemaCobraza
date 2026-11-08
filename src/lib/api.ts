@@ -1,30 +1,14 @@
 import axios from 'axios';
-import type { AuditItem, DebtItem, ExpenseItem, ListQuery, PaymentItem, RouteItem, SessionUser, SettlementItem } from '../types';
-import {
-  toAudit,
-  toDebt,
-  toExpense,
-  toPayment,
-  toRoute,
-  toSettlement,
-  unwrapList,
-  asRecord,
-  asString,
-  pick,
-} from './normalize';
+import type { DashboardSummary, DebtItem, DeudaCreate, LiquidarInput, PagoCreate, RouteItem, RouteStats, SessionUser, TodayDetails } from '../types';
+import { asList, asNumber, asRecord, asString, fastApiDetail, toDebt, toRoute, toRouteStats, toTodayDetails } from './normalize';
 
-export interface ReadResult<T> {
-  rows: T[];
-  truncated: boolean;
-}
-
-const READ_LIMIT = 1000;
-
-const LOGIN_PATH = '/auth/login';
+const LOGIN_PATH = '/login';
 const TOKEN_KEY = 'panel_gerencial_token';
 
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gestor-pagos.com';
+
 const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
+  baseURL: API_BASE_URL,
   timeout: 20000,
   headers: { Accept: 'application/json' },
 });
@@ -55,20 +39,10 @@ function requestPath(url: string): string {
   return pathname.replace(/\/+$/, '') || '/';
 }
 
-export function isAllowedRequest(method: string, url: string): boolean {
-  const normalized = method.toLowerCase();
-  if (normalized === 'get' || normalized === 'head') return true;
-  return normalized === 'post' && requestPath(url) === LOGIN_PATH;
-}
-
 http.interceptors.request.use((config) => {
-  const method = (config.method ?? 'get').toLowerCase();
-  const url = config.url ?? '';
-  if (!isAllowedRequest(method, url)) {
-    return Promise.reject(new Error('El panel gerencial es de solo lectura.'));
-  }
   const token = readToken();
-  if (token && requestPath(url) !== LOGIN_PATH) {
+  const path = requestPath(config.url ?? '');
+  if (token && path !== LOGIN_PATH) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
@@ -78,8 +52,8 @@ http.interceptors.response.use(
   (response) => response,
   (error: unknown) => {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
-      const url = error.config?.url ?? '';
-      if (requestPath(url) !== LOGIN_PATH) onUnauthorized();
+      const path = requestPath(error.config?.url ?? '');
+      if (path !== LOGIN_PATH) onUnauthorized();
     }
     return Promise.reject(error);
   },
@@ -88,77 +62,176 @@ http.interceptors.response.use(
 export function errorMessage(error: unknown, fallback = 'No fue posible cargar la información.'): string {
   if (axios.isCancel(error)) return '';
   if (axios.isAxiosError(error)) {
-    if (error.message === 'El panel gerencial es de solo lectura.') return error.message;
+    const detail = fastApiDetail(error.response?.data);
+    if (detail) return detail;
     if (!error.response) return 'No hay conexión con el servicio de cobranza.';
-    if (error.response.status === 401) return 'Usuario o clave incorrectos.';
-    if (error.response.status === 403) return 'No tiene permiso para consultar este recurso.';
+    if (error.response.status === 401) return 'La sesión no es válida.';
+    if (error.response.status === 403) return 'No tiene permiso para esta consulta.';
     return fallback;
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
 }
 
-function queryParams(query: ListQuery = {}) {
-  return {
-    fecha_desde: query.from || undefined,
-    fecha_hasta: query.to || undefined,
-    ruta_id: query.routeId || undefined,
-    page: query.page,
-    page_size: query.pageSize ?? READ_LIMIT,
-    limit: query.pageSize ?? READ_LIMIT,
-  };
+function routeIdParam(routeId?: string) {
+  if (!routeId) return undefined;
+  const id = Number(routeId);
+  return Number.isInteger(id) ? id : undefined;
 }
 
-async function getRows(path: string, query?: ListQuery, signal?: AbortSignal) {
-  const response = await http.get(path, { params: queryParams(query), signal });
-  const { items, total } = unwrapList(response.data);
-  return { items, truncated: total !== null && total > items.length };
+async function mapPool<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
 }
 
 export async function login(username: string, password: string): Promise<{ token: string; user: SessionUser }> {
-  const response = await http.post(LOGIN_PATH, { username, password });
+  const form = new URLSearchParams();
+  form.set('username', username);
+  form.set('password', password);
+  const response = await http.post(LOGIN_PATH, form, {
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  });
   const root = asRecord(response.data) ?? {};
-  const nested = asRecord(root.data) ?? {};
-  const token = asString(
-    pick(root, ['access_token', 'token', 'accessToken']) ?? pick(nested, ['access_token', 'token', 'accessToken']),
-  );
+  const token = asString(root.access_token);
   if (!token) throw new Error('La respuesta de acceso no incluye un token.');
-  const userRecord = asRecord(root.user) ?? asRecord(root.usuario) ?? asRecord(nested.user) ?? {};
   return {
     token,
     user: {
-      username: asString(pick(userRecord, ['username', 'usuario', 'email', 'nombre']), username),
-      role: asString(pick(userRecord, ['role', 'rol', 'perfil']), 'Gerencia'),
+      username,
+      nombreCompleto: asString(root.nombre_completo, username),
+      role: asString(root.rol, 'CONSULTA'),
     },
   };
 }
 
-export async function getRoutes(signal?: AbortSignal): Promise<ReadResult<RouteItem>> {
-  const { items, truncated } = await getRows('/rutas', undefined, signal);
-  return { rows: items.map(toRoute), truncated };
+export async function getRoutes(signal?: AbortSignal): Promise<RouteItem[]> {
+  const response = await http.get('/rutas/', { signal });
+  return asList(response.data).map(toRoute);
 }
 
-export async function getDebts(query?: ListQuery, signal?: AbortSignal): Promise<ReadResult<DebtItem>> {
-  const { items, truncated } = await getRows('/deudas', query, signal);
-  return { rows: items.map(toDebt), truncated };
+export async function getRouteStats(route: RouteItem, signal?: AbortSignal): Promise<RouteStats> {
+  const response = await http.get(`/rutas/${route.id}/estadisticas`, { signal });
+  return toRouteStats(route, asRecord(response.data) ?? {});
 }
 
-export async function getPayments(query?: ListQuery, signal?: AbortSignal): Promise<ReadResult<PaymentItem>> {
-  const { items, truncated } = await getRows('/pagos', query, signal);
-  return { rows: items.map(toPayment), truncated };
+export async function getDashboardSummary(signal?: AbortSignal): Promise<DashboardSummary> {
+  const response = await http.get('/dashboard/resumen', { signal });
+  const data = asRecord(response.data) ?? {};
+  return {
+    baseInyectada: asNumber(data.base_inyectada),
+    cobrado: asNumber(data.cobrado_hoy),
+    prestado: asNumber(data.prestado_hoy),
+    gastos: asNumber(data.gastos_hoy),
+    cartera: asNumber(data.total_en_calle),
+    dineroEnCaja: asNumber(data.dinero_en_caja),
+  };
 }
 
-export async function getExpenses(query?: ListQuery, signal?: AbortSignal): Promise<ReadResult<ExpenseItem>> {
-  const { items, truncated } = await getRows('/gastos', query, signal);
-  return { rows: items.map(toExpense), truncated };
+export function summaryFromStats(stats: RouteStats): DashboardSummary {
+  return {
+    baseInyectada: stats.baseInyectada,
+    cobrado: stats.totalRecaudado,
+    prestado: stats.totalVendido,
+    gastos: stats.totalGastos,
+    cartera: stats.carteraActual,
+    dineroEnCaja: stats.dineroEnCaja,
+  };
 }
 
-export async function getSettlements(query?: ListQuery, signal?: AbortSignal): Promise<ReadResult<SettlementItem>> {
-  const { items, truncated } = await getRows('/liquidaciones', query, signal);
-  return { rows: items.map(toSettlement), truncated };
+export async function getTodayDetails(signal?: AbortSignal): Promise<TodayDetails> {
+  const response = await http.get('/dashboard/detalles_hoy', { signal });
+  return toTodayDetails(response.data);
 }
 
-export async function getAuditLogs(query?: ListQuery, signal?: AbortSignal): Promise<ReadResult<AuditItem>> {
-  const { items, truncated } = await getRows('/logs_auditoria', query, signal);
-  return { rows: items.map(toAudit), truncated };
+export async function getClients(routeId?: string, signal?: AbortSignal) {
+  const rutaId = routeIdParam(routeId);
+  const response = await http.get('/clientes/', {
+    signal,
+    params: rutaId === undefined ? undefined : { ruta_id: rutaId },
+  });
+  return asList(response.data);
+}
+
+export async function getClientHistory(clientId: string, signal?: AbortSignal) {
+  const response = await http.get(`/clientes/${clientId}/historial`, { signal });
+  return asList(response.data);
+}
+
+export async function getPortfolio(routeId: string | undefined, routes: RouteItem[], signal?: AbortSignal): Promise<DebtItem[]> {
+  const clients = await getClients(routeId, signal);
+  const names = new Map(routes.map((route) => [route.id, route.name]));
+  const groups = await mapPool(clients, 5, async (client) => {
+    const clientId = asString(client.id);
+    const routeKey = asString(client.ruta_id);
+    const history = await getClientHistory(clientId, signal);
+    const profile = {
+      id: clientId,
+      name: `${asString(client.nombre)} ${asString(client.apellido)}`.trim() || 'Cliente',
+      document: asString(client.cedula_identidad, '—'),
+      routeId: routeKey,
+      routeName: names.get(routeKey) ?? (routeKey ? `Ruta ${routeKey}` : 'Sin ruta'),
+    };
+    return history.map((debt) => toDebt(debt, profile));
+  });
+  return groups.flat();
+}
+
+export async function crearPago(body: PagoCreate) {
+  const response = await http.post(
+    '/pagos/',
+    {
+      deuda_id: body.deuda_id,
+      monto: body.monto,
+      latitud: body.latitud ?? 0,
+      longitud: body.longitud ?? 0,
+    },
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  return response.data as unknown;
+}
+
+export async function crearDeuda(body: DeudaCreate) {
+  const response = await http.post(
+    '/deudas/',
+    {
+      cliente_id: body.cliente_id,
+      tipo_servicio: body.tipo_servicio,
+      descripcion_articulo: body.descripcion_articulo ?? null,
+      frecuencia_pago: body.frecuencia_pago,
+      monto_original: body.monto_original,
+      interes_porcentaje: body.interes_porcentaje,
+      num_cuotas_total: body.num_cuotas_total,
+      fecha_inicio_pago: body.fecha_inicio_pago,
+      latitud: body.latitud ?? 0,
+      longitud: body.longitud ?? 0,
+    },
+    { headers: { 'Content-Type': 'application/json' } },
+  );
+  return response.data as unknown;
+}
+
+export async function liquidar(body: LiquidarInput = {}) {
+  const payload: LiquidarInput = {};
+  if (body.ruta_id !== undefined) payload.ruta_id = body.ruta_id;
+  const response = await http.post('/liquidar/', payload, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  return response.data as unknown;
+}
+
+export async function eliminarDeuda(deudaId: number, motivo?: string) {
+  const text = motivo?.trim();
+  const response = await http.delete(`/deudas/${deudaId}`, {
+    params: text ? { motivo: text } : undefined,
+  });
+  return response.data as unknown;
 }

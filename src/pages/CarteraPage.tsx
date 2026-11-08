@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '../components/ui/Badge';
 import { DataTable } from '../components/ui/DataTable';
-import { ErrorBlock, LoadingBlock, TruncationNote } from '../components/ui/Feedback';
+import { ErrorBlock, LoadingBlock } from '../components/ui/Feedback';
 import { Filters } from '../components/ui/Filters';
 import { PageHeader } from '../components/ui/PageHeader';
-import { errorMessage, getDebts, getRoutes } from '../lib/api';
+import { errorMessage, getPortfolio, getRoutes } from '../lib/api';
 import { PAGE_SIZE, formatDate, formatMoney, inRange, monthRange, paginate } from '../lib/format';
 import type { DebtItem, DebtStatus, RouteItem } from '../types';
 
@@ -32,18 +32,17 @@ export function CarteraPage() {
   const [debts, setDebts] = useState<DebtItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [truncated, setTruncated] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError('');
-    Promise.all([getRoutes(controller.signal), getDebts({ from, to, routeId }, controller.signal)])
-      .then(([nextRoutes, nextDebts]) => {
-        setRoutes(nextRoutes.rows);
-        setDebts(nextDebts.rows);
-        setTruncated(nextRoutes.truncated || nextDebts.truncated);
+    getRoutes(controller.signal)
+      .then(async (nextRoutes) => {
+        const portfolio = await getPortfolio(routeId || undefined, nextRoutes, controller.signal);
+        setRoutes(nextRoutes);
+        setDebts(portfolio);
       })
       .catch((caught: unknown) => {
         if (controller.signal.aborted) return;
@@ -53,18 +52,12 @@ export function CarteraPage() {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [from, to, routeId, reloadKey]);
+  }, [routeId, reloadKey]);
 
-  const rows = useMemo(() => {
-    const names = new Map(routes.map((route) => [route.id, route.name]));
-    return debts
-      .filter((debt) => (!routeId || debt.routeId === routeId) && (debt.status === 'mora' || inRange(debt.dueDate, from, to) || !debt.dueDate))
-      .map((debt) => ({
-        ...debt,
-        routeName: names.get(debt.routeId) ?? (debt.routeId ? `Ruta ${debt.routeId}` : 'Sin ruta'),
-      }));
-  }, [debts, routes, routeId, from, to]);
-
+  const rows = useMemo(
+    () => debts.filter((debt) => debt.status === 'mora' || inRange(debt.startDate, from, to) || !debt.startDate),
+    [debts, from, to],
+  );
   const paged = paginate(rows, page, PAGE_SIZE);
 
   return (
@@ -72,7 +65,7 @@ export function CarteraPage() {
       <PageHeader
         eyebrow="Cartera"
         title="Estado de las obligaciones"
-        description="Saldos consultados por ruta. El vencimiento acota la vista; las deudas en mora permanecen visibles aunque queden fuera del rango."
+        description="Clientes de GET /clientes/ y préstamos de GET /clientes/{id}/historial. La ruta viaja como ?ruta_id=. En mora sigue visible aunque el inicio quede fuera del rango."
       />
       <Filters
         from={from}
@@ -92,7 +85,6 @@ export function CarteraPage() {
           setPage(1);
         }}
       />
-      <TruncationNote show={!loading && !error && truncated} />
       {loading ? (
         <LoadingBlock />
       ) : error ? (
@@ -101,11 +93,13 @@ export function CarteraPage() {
         <DataTable
           columns={[
             { key: 'client', header: 'Cliente', render: (row) => <span className="font-medium text-slate-950">{row.clientName}</span> },
-            { key: 'document', header: 'Documento', render: (row) => row.document },
+            { key: 'document', header: 'Cédula', render: (row) => row.document },
             { key: 'route', header: 'Ruta', render: (row) => row.routeName },
-            { key: 'principal', header: 'Capital', align: 'right', render: (row) => formatMoney(row.principal) },
+            { key: 'description', header: 'Préstamo', render: (row) => row.description },
             { key: 'balance', header: 'Saldo', align: 'right', render: (row) => <span className="font-medium text-slate-950">{formatMoney(row.balance)}</span> },
-            { key: 'due', header: 'Vencimiento', render: (row) => formatDate(row.dueDate) },
+            { key: 'installments', header: 'Cuotas', align: 'right', render: (row) => row.pendingInstallments },
+            { key: 'late', header: 'Atraso', align: 'right', render: (row) => (row.lateDays > 0 ? `${row.lateDays} días` : '—') },
+            { key: 'start', header: 'Inicio', render: (row) => formatDate(row.startDate) },
             { key: 'status', header: 'Estado', render: (row) => <Badge tone={statusTone[row.status]}>{statusLabel[row.status]}</Badge> },
           ]}
           rows={paged.slice}

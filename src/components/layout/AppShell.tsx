@@ -54,7 +54,8 @@ export function AppShell() {
               <span className="hidden rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-inset ring-emerald-700/10 sm:inline">
                 Solo lectura
               </span>
-              <span className="max-w-40 truncate text-sm text-slate-700">{user?.username}</span>
+              <span className="max-w-44 truncate text-sm text-slate-700">{user?.nombreCompleto || user?.username}</span>
+              <span className="hidden text-xs text-slate-400 sm:inline">{user?.role}</span>
               <button
                 type="button"
                 className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 transition hover:bg-slate-50"

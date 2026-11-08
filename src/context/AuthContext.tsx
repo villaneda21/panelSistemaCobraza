@@ -15,13 +15,17 @@ const AuthContext = createContext<AuthState | null>(null);
 function readUser(): SessionUser | null {
   if (!readToken()) return null;
   const raw = sessionStorage.getItem(USER_KEY);
-  if (!raw) return { username: 'Gerencia', role: 'Consulta' };
+  if (!raw) return { username: 'Gerencia', nombreCompleto: 'Gerencia', role: 'CONSULTA' };
   try {
     const parsed = JSON.parse(raw) as SessionUser;
-    if (!parsed?.username) return { username: 'Gerencia', role: 'Consulta' };
-    return parsed;
+    if (!parsed?.username) return { username: 'Gerencia', nombreCompleto: 'Gerencia', role: 'CONSULTA' };
+    return {
+      username: parsed.username,
+      nombreCompleto: parsed.nombreCompleto || parsed.username,
+      role: parsed.role || 'CONSULTA',
+    };
   } catch {
-    return { username: 'Gerencia', role: 'Consulta' };
+    return { username: 'Gerencia', nombreCompleto: 'Gerencia', role: 'CONSULTA' };
   }
 }
 
