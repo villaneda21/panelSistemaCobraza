@@ -57,8 +57,8 @@ Frontend de consulta para gerencia. No registra, edita ni elimina información o
 - **Imagen:** `panel_gerencial`
 - **Puerto publicado:** `3000` hacia Nginx `80` (`PANEL_PORT` para cambiarlo)
 - **Red:** externa, la misma de `fastapi_app`. Variable `COBRANZA_DOCKER_NETWORK` (por defecto `sistema_cobranza_default`)
-- **API:** el navegador llama a `/api` en el mismo panel. Nginx reenvía ese prefijo a `fastapi_app:8000`. Las consultas llevan `Authorization: Bearer`.
-- **Login:** `POST /api/auth/login` con `application/x-www-form-urlencoded` (`username` y `password`). Nginx lo entrega en `POST /login` del FastAPI. Un JSON en ese login produce 422, porque OAuth2 no lee el cuerpo JSON. La respuesta trae `access_token`, `token_type`, `rol` y `nombre_completo`. El mensaje de error llega en `detail`.
+- **API:** el navegador llama al mismo host, puerto `8000` (`http://<servidor>:8000`). Ahí escucha FastAPI. Las consultas llevan `Authorization: Bearer`.
+- **Login:** `POST http://<servidor>:8000/login` con `application/x-www-form-urlencoded` (`username` y `password`). Un JSON en ese login produce 422, porque OAuth2 no lee el cuerpo JSON. La respuesta trae `access_token`, `token_type`, `rol` y `nombre_completo`. El mensaje de error llega en `detail`.
 - **Consultas:** `GET /dashboard/resumen`, `GET /dashboard/detalles_hoy`, `GET /rutas/`, `GET /rutas/{id}/estadisticas`, `GET /clientes/?ruta_id=` y `GET /clientes/{id}/historial`
 - **Escrituras disponibles en el cliente, sin botones en la pantalla:** `POST /pagos/` (`deuda_id`, `monto`), `POST /deudas/` (esquema `DeudaCreate`) y `POST /liquidar/` (`ruta_id` opcional), en JSON. `DELETE /deudas/{deuda_id}` manda `motivo` por query cuando se informa.
 
@@ -67,7 +67,7 @@ docker inspect fastapi_app --format '{{range $k, $v := .NetworkSettings.Networks
 COBRANZA_DOCKER_NETWORK=<red> docker compose up -d --build
 ```
 
-El panel queda en `http://<servidor>:3000`. Hay que reconstruir la imagen para que el navegador deje de usar el JavaScript anterior. En la máquina local:
+El panel queda en `http://<servidor>:3000` y las peticiones salen a `http://<servidor>:8000`. Hay que reconstruir la imagen para reemplazar el JavaScript anterior. En la máquina local:
 
 ```bash
 npm install

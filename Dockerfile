@@ -11,9 +11,6 @@ COPY index.html vite.config.ts tsconfig.json tailwind.config.cjs postcss.config.
 COPY public ./public
 COPY src ./src
 
-ARG VITE_API_BASE_URL=/api
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-
 RUN npm run build
 
 FROM nginx:1.27-alpine

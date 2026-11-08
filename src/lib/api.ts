@@ -3,11 +3,18 @@ import type { DashboardSummary, DebtItem, DeudaCreate, LiquidarInput, PagoCreate
 import { asList, asNumber, asRecord, asString, fastApiDetail, toDebt, toRoute, toRouteStats, toTodayDetails } from './normalize';
 
 const TOKEN_KEY = 'panel_gerencial_token';
+const LOGIN_PATH = '/login';
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+function resolveApiBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_BASE_URL?.replace(/\/+$/, '');
+  if (configured) return configured;
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    return `${window.location.protocol}//${window.location.hostname}:8000`;
+  }
+  return 'http://127.0.0.1:8000';
+}
 
-const LOGIN_PATH =
-  import.meta.env.VITE_LOGIN_PATH || (API_BASE_URL.startsWith('http') ? '/login' : '/auth/login');
+export const API_BASE_URL = resolveApiBaseUrl();
 
 const http = axios.create({
   baseURL: API_BASE_URL,
