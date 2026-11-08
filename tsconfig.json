@@ -16,5 +16,6 @@
     "noFallthroughCasesInSwitch": true,
     "allowImportingTsExtensions": false
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/lib/settlement.ts"]
 }

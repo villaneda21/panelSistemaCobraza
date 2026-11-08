@@ -11,6 +11,10 @@ COPY index.html vite.config.ts tsconfig.json tailwind.config.cjs postcss.config.
 COPY public ./public
 COPY src ./src
 
+# Un checkout a medias deja src/lib/settlement.ts del primer commit.
+# Ese archivo importa ExpenseItem, PaymentItem y SettlementItem, que ya no existen.
+RUN rm -f src/lib/settlement.ts
+
 RUN npm run build
 
 FROM nginx:1.27-alpine
