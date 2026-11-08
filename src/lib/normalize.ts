@@ -1,4 +1,4 @@
-import type { DebtItem, DebtStatus, RouteItem, RouteStats, TodayDetails } from '../types';
+import type { ClientDebt, ClientItem, ClientPayment, ClientRow, ClientStanding, DebtItem, DebtStatus, RouteItem, RouteStats, TodayDetails } from '../types';
 
 export function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
@@ -113,6 +113,85 @@ export function toDebt(
     lateDays,
     startDate: asString(pick(record, ['fecha_inicio_pago', 'fecha_creacion'])) || null,
     status: debtStatus(rawStatus, balance, total, lateDays),
+  };
+}
+
+export function toClient(record: Record<string, unknown>, routeName: string): ClientItem {
+  const firstName = asString(record.nombre);
+  const lastName = asString(record.apellido);
+  const id = asString(record.id);
+  const routeId = asString(record.ruta_id);
+  return {
+    id,
+    fullName: `${firstName} ${lastName}`.trim() || (id ? `Cliente ${id}` : 'Cliente'),
+    document: asString(record.cedula_identidad, '—'),
+    phone: asString(record.telefono, '—'),
+    address: asString(record.direccion, '—'),
+    routeId,
+    routeName: routeName || (routeId ? `Ruta ${routeId}` : 'Sin ruta'),
+  };
+}
+
+export function toClientPayment(record: Record<string, unknown>, debtId: string): ClientPayment {
+  return {
+    id: asString(record.id) || `${debtId}-${asString(record.fecha_pago)}-${asNumber(record.monto)}`,
+    debtId,
+    amount: asNumber(record.monto),
+    paidAt: asString(record.fecha_pago) || null,
+  };
+}
+
+export function toClientDebt(record: Record<string, unknown>): ClientDebt {
+  const id = asString(record.id);
+  const payments = asList(record.pagos)
+    .map((row) => toClientPayment(row, id))
+    .sort((a, b) => (b.paidAt ?? '').localeCompare(a.paidAt ?? ''));
+  const paid = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const balance = asNumber(pick(record, ['saldo_pendiente', 'saldo']));
+  const total = asNumber(pick(record, ['monto_total_con_interes']), balance + paid);
+  const lateDays = asNumber(record.dias_atraso);
+  const rawStatus = asString(pick(record, ['estado']), 'ACTIVA');
+  const description = asString(pick(record, ['descripcion_articulo', 'tipo_servicio']), 'Préstamo');
+  return {
+    id,
+    description,
+    service: asString(record.tipo_servicio),
+    frequency: asString(record.frecuencia_pago),
+    totalWithInterest: total,
+    balance,
+    paid,
+    installmentsTotal: asNumber(record.num_cuotas_total),
+    pendingInstallments: asNumber(record.cuotas_pendientes),
+    installmentValue: asNumber(record.valor_cuota_promedio),
+    lateDays,
+    status: debtStatus(rawStatus, balance, total, lateDays),
+    rawStatus,
+    startDate: asString(pick(record, ['fecha_inicio_pago', 'fecha_creacion'])) || null,
+    createdAt: asString(record.fecha_creacion) || null,
+    endDate: asString(record.fecha_final_estimada) || null,
+    payments,
+  };
+}
+
+export function summarizeClient(client: ClientItem, debts: ClientDebt[], historyAvailable: boolean): ClientRow {
+  const activeBalance = debts.filter((debt) => debt.status !== 'saldada').reduce((sum, debt) => sum + debt.balance, 0);
+  const totalPaid = debts.reduce((sum, debt) => sum + debt.paid, 0);
+  const lateDays = debts.reduce((max, debt) => Math.max(max, debt.lateDays), 0);
+  let standing: ClientStanding = 'sin_deuda';
+  if (!historyAvailable) standing = 'sin_deuda';
+  else if (debts.some((debt) => debt.status === 'mora')) standing = 'mora';
+  else if (debts.length === 0) standing = 'sin_deuda';
+  else if (activeBalance <= 0) standing = 'saldada';
+  else if (debts.some((debt) => debt.status === 'parcial')) standing = 'parcial';
+  else standing = 'vigente';
+  return {
+    ...client,
+    activeBalance,
+    totalPaid,
+    debtCount: debts.length,
+    lateDays,
+    standing,
+    historyAvailable,
   };
 }
 

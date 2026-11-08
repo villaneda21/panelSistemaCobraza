@@ -1,4 +1,5 @@
 export type DebtStatus = 'saldada' | 'mora' | 'vigente' | 'parcial';
+export type ClientStanding = DebtStatus | 'sin_deuda';
 
 export interface SessionUser {
   username: string;
@@ -57,6 +58,52 @@ export interface TodayDetails {
   pagos: TodayPayment[];
   prestamos: TodayLoan[];
   gastos: TodayExpense[];
+}
+
+export interface ClientItem {
+  id: string;
+  fullName: string;
+  document: string;
+  phone: string;
+  address: string;
+  routeId: string;
+  routeName: string;
+}
+
+export interface ClientPayment {
+  id: string;
+  debtId: string;
+  amount: number;
+  paidAt: string | null;
+}
+
+export interface ClientDebt {
+  id: string;
+  description: string;
+  service: string;
+  frequency: string;
+  totalWithInterest: number;
+  balance: number;
+  paid: number;
+  installmentsTotal: number;
+  pendingInstallments: number;
+  installmentValue: number;
+  lateDays: number;
+  status: DebtStatus;
+  rawStatus: string;
+  startDate: string | null;
+  createdAt: string | null;
+  endDate: string | null;
+  payments: ClientPayment[];
+}
+
+export interface ClientRow extends ClientItem {
+  activeBalance: number;
+  totalPaid: number;
+  debtCount: number;
+  lateDays: number;
+  standing: ClientStanding;
+  historyAvailable: boolean;
 }
 
 export interface DebtItem {

@@ -1,9 +1,11 @@
-import { LayoutDashboard, LogOut, ReceiptText, ScrollText, Wallet } from 'lucide-react';
+import { HandCoins, LayoutDashboard, LogOut, ReceiptText, ScrollText, Users, Wallet } from 'lucide-react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 const links = [
   { to: '/', label: 'Resumen', icon: LayoutDashboard, end: true },
+  { to: '/gastos', label: 'Gastos', icon: HandCoins, end: false },
+  { to: '/clientes', label: 'Clientes', icon: Users, end: false },
   { to: '/cartera', label: 'Cartera', icon: Wallet, end: false },
   { to: '/liquidacion', label: 'Liquidación', icon: ReceiptText, end: false },
   { to: '/auditoria', label: 'Auditoría', icon: ScrollText, end: false },

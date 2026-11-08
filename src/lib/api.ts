@@ -1,6 +1,6 @@
 import axios from 'axios';
-import type { DashboardSummary, DebtItem, DeudaCreate, LiquidarInput, PagoCreate, RouteItem, RouteStats, SessionUser, TodayDetails } from '../types';
-import { asList, asNumber, asRecord, asString, fastApiDetail, toDebt, toRoute, toRouteStats, toTodayDetails } from './normalize';
+import type { ClientDebt, ClientItem, ClientRow, DashboardSummary, DebtItem, DeudaCreate, LiquidarInput, PagoCreate, RouteItem, RouteStats, SessionUser, TodayDetails } from '../types';
+import { asList, asNumber, asRecord, asString, fastApiDetail, summarizeClient, toClient, toClientDebt, toDebt, toRoute, toRouteStats, toTodayDetails } from './normalize';
 
 const TOKEN_KEY = 'panel_gerencial_token';
 const LOGIN_PATH = '/login';
@@ -161,35 +161,80 @@ export async function getTodayDetails(signal?: AbortSignal): Promise<TodayDetail
   return toTodayDetails(response.data);
 }
 
-export async function getClients(routeId?: string, signal?: AbortSignal) {
+export async function getClients(routeId: string | undefined, routes: RouteItem[], signal?: AbortSignal): Promise<ClientItem[]> {
   const rutaId = routeIdParam(routeId);
   const response = await http.get('/clientes/', {
     signal,
     params: rutaId === undefined ? undefined : { ruta_id: rutaId },
   });
-  return asList(response.data);
+  const names = new Map(routes.map((route) => [route.id, route.name]));
+  return asList(response.data).map((row) => {
+    const routeKey = asString(row.ruta_id);
+    return toClient(row, names.get(routeKey) ?? '');
+  });
 }
 
-export async function getClientHistory(clientId: string, signal?: AbortSignal) {
+export async function getClientHistory(clientId: string, signal?: AbortSignal): Promise<ClientDebt[]> {
   const response = await http.get(`/clientes/${clientId}/historial`, { signal });
-  return asList(response.data);
+  return asList(response.data).map(toClientDebt);
+}
+
+export async function getClientProfile(clientId: string, signal?: AbortSignal): Promise<{ client: ClientItem; debts: ClientDebt[] }> {
+  const [clientResponse, debts] = await Promise.all([
+    http.get(`/clientes/${clientId}`, { signal }),
+    getClientHistory(clientId, signal),
+  ]);
+  const record = asRecord(clientResponse.data) ?? {};
+  let routeName = '';
+  try {
+    const routes = await getRoutes(signal);
+    routeName = routes.find((route) => route.id === asString(record.ruta_id))?.name ?? '';
+  } catch (error) {
+    if (axios.isCancel(error)) throw error;
+  }
+  return { client: toClient(record, routeName), debts };
+}
+
+export async function getClientRows(routeId: string | undefined, routes: RouteItem[], signal?: AbortSignal): Promise<ClientRow[]> {
+  const clients = await getClients(routeId, routes, signal);
+  return mapPool(clients, 5, async (client) => {
+    try {
+      const debts = await getClientHistory(client.id, signal);
+      return summarizeClient(client, debts, true);
+    } catch (error) {
+      if (axios.isCancel(error)) throw error;
+      return summarizeClient(client, [], false);
+    }
+  });
 }
 
 export async function getPortfolio(routeId: string | undefined, routes: RouteItem[], signal?: AbortSignal): Promise<DebtItem[]> {
-  const clients = await getClients(routeId, signal);
-  const names = new Map(routes.map((route) => [route.id, route.name]));
+  const clients = await getClients(routeId, routes, signal);
   const groups = await mapPool(clients, 5, async (client) => {
-    const clientId = asString(client.id);
-    const routeKey = asString(client.ruta_id);
-    const history = await getClientHistory(clientId, signal);
+    const history = await getClientHistory(client.id, signal);
     const profile = {
-      id: clientId,
-      name: `${asString(client.nombre)} ${asString(client.apellido)}`.trim() || 'Cliente',
-      document: asString(client.cedula_identidad, '—'),
-      routeId: routeKey,
-      routeName: names.get(routeKey) ?? (routeKey ? `Ruta ${routeKey}` : 'Sin ruta'),
+      id: client.id,
+      name: client.fullName,
+      document: client.document,
+      routeId: client.routeId,
+      routeName: client.routeName,
     };
-    return history.map((debt) => toDebt(debt, profile));
+    return history.map((debt) =>
+      toDebt(
+        {
+          id: debt.id,
+          descripcion_articulo: debt.description,
+          saldo_pendiente: debt.balance,
+          monto_total_con_interes: debt.totalWithInterest,
+          monto_original: debt.totalWithInterest,
+          cuotas_pendientes: debt.pendingInstallments,
+          dias_atraso: debt.lateDays,
+          estado: debt.rawStatus,
+          fecha_inicio_pago: debt.startDate,
+        },
+        profile,
+      ),
+    );
   });
   return groups.flat();
 }

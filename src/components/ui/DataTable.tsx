@@ -18,6 +18,7 @@ export function DataTable<T>({
   start,
   end,
   onPage,
+  minWidth = 880,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -28,11 +29,12 @@ export function DataTable<T>({
   start: number;
   end: number;
   onPage: (page: number) => void;
+  minWidth?: number;
 }) {
   return (
     <section className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[880px] border-separate border-spacing-0 text-left text-sm">
+        <table className="w-full border-separate border-spacing-0 text-left text-sm" style={{ minWidth }}>
           <thead>
             <tr className="bg-slate-50/90 text-[11px] uppercase tracking-[0.12em] text-slate-500">
               {columns.map((column) => (
